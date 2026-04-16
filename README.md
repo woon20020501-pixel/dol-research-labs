@@ -27,6 +27,22 @@ The framework addresses:
 
 Read the full document: [`CAD-F-whitepaper.md`](./CAD-F-whitepaper.md)
 
+### MDLW: Mirror-Descent Ladder Warrant
+
+A retail-first structured derivative that pays incremental rewards when an underlying asset touches predefined downside price levels before maturity.
+
+The key design innovation: a mirror-descent allocation engine distributes a fixed maximum payout budget across ladder levels based on market stress signals **at issuance time**, then **locks the payout structure after purchase**. This separation preserves consumer clarity (the user knows exactly what they bought) while allowing the protocol to adapt across issuance series.
+
+The framework provides five mathematical guarantees provable without production data:
+
+- **Bounded issuer payout** — total payout per warrant is capped at M by construction
+- **Bounded buyer loss** — maximum loss equals premium paid, no margin calls
+- **Simplex-preserving weights** — the mirror-descent update stays on the probability simplex
+- **Monotonic reward unlocking** — hitting more levels never reduces payoff
+- **Deterministic settlement** — settlement depends only on series parameters and barrier-hit set
+
+Read the full document: [`MDLW-whitepaper.md`](./MDLW-whitepaper.md)
+
 ## Our vision
 
 Dol is building toward a world where on-chain yield feels as simple as a savings account. Phase 1 delivers the retail UX and the market-neutral engine. The research in this repository maps the path from Phase 1 to a full risk operating system — one where the protocol answers every risk question mathematically, continuously, and verifiably, so the user never has to.
