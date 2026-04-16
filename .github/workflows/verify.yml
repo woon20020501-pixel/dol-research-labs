@@ -11,6 +11,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install pytest numpy scipy sympy
+        run: pip install pytest numpy scipy sympy pycryptodome
       - name: Run verification suite
         run: pytest verification/ -v --tb=short
