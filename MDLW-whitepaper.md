@@ -295,7 +295,34 @@ This separation is stated explicitly to distinguish mathematical guarantees from
 
 ---
 
-## 10. Open Research Items
+## 10. Verification Plan
+
+### 10.1 Mathematical Verification (included in technical appendix)
+
+- Simplex preservation
+- Bounded payout (sum q_k = M)
+- Bounded buyer loss
+- Monotonic reward unlocking
+- Relative weight shift property
+
+### 10.2 Property Tests
+
+- No path yields Pi_T > M
+- No path yields negative payout
+- Same input state yields same issuance vector
+- Reserve never underfunded for live supply
+
+### 10.3 Simulation Tests
+
+- GBM price paths (sanity baseline)
+- Jump-diffusion paths (fat tails)
+- Low-depth shock scenarios (liquidity crisis)
+- Liquidation burst scenarios (cascade events)
+- Basis widening scenarios (cross-venue stress)
+
+---
+
+## 11. Open Research Items
 
 - Optimal calibration of issuance-time score function
 - Issuance cadence vs regime responsiveness tradeoff

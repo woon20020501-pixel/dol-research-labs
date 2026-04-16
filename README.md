@@ -8,40 +8,61 @@ Dol turns perpetual DEX infrastructure into a retail savings product. Users depo
 
 The product is live at [dol-finance.vercel.app](https://dol-finance.vercel.app). The production codebase is at [github.com/woon20020501-pixel/dol](https://github.com/woon20020501-pixel/dol).
 
-## What this repository contains
+---
+
+## Research Documents
 
 ### CAD-F: Capital Adequacy Framework
 
-A research design document specifying the mathematical framework for capital adequacy across a suite of DeFi yield and option products.
+A mathematical framework for capital adequacy across a suite of DeFi yield and option products. Covers market risk (posterior-robust ES, KL-DRO, Huber contamination), operational risk (Panjer-Poisson LDA), feedback dynamics (premium-capital SDE with provable stability), governance (Sybil-resistant cluster-level concentration), and liquidity solvency (HCR/RCR with circuit-breaker enforcement).
 
-The framework addresses:
+Read: [`CAD-F-whitepaper.md`](./CAD-F-whitepaper.md)
 
-- **Market risk** — product-specific Expected Shortfall under posterior parameter uncertainty, with EVT tail splicing for extreme scenarios
-- **Model uncertainty** — two layers: KL-divergence robust optimization for small perturbations, and Knightian epsilon-contamination for discrete model-class breaks
-- **Operational risk** — actuarial loss distribution across five risk categories (oracle, smart contract, exchange, regulatory, key management)
-- **Feedback dynamics** — a three-variable premium-capital SDE with provable local stability (Routh-Hurwitz) and sufficient conditions for Lyapunov decay
-- **Governance** — Sybil-resistant concentration controls at the beneficial-owner cluster level, not the wallet level
-- **Liquidity solvency** — Hedge Coverage Ratio and Redemption Coverage Ratio with circuit-breaker enforcement
+### Phase 2: Quantitative Risk Operating System
 
-**Status:** Research design document. The underlying yield product (Dol Phase 1) is live. The four option products described in CAD-F are under design and have not been deployed.
+The specification for Dol's closed-loop risk operating system. Seven mathematical modules (M1-M7) and eight engineering modules (E1-E8), each with provable properties, falsifiable tests, and phased deployment plans. Includes formal theorems for one-step redemption solvency, water-filling budget feasibility, cluster Sybil invariance, and monotone tail risk reduction.
 
-Read the full document: [`CAD-F-whitepaper.md`](./CAD-F-whitepaper.md)
+Read: [`phase2-risk-os.md`](./phase2-risk-os.md)
 
 ### MDLW: Mirror-Descent Ladder Warrant
 
-A retail-first structured derivative that pays incremental rewards when an underlying asset touches predefined downside price levels before maturity.
+A retail-first structured derivative where users buy warrants that pay incremental rewards as an underlying asset touches predefined downside price levels. A mirror-descent allocation engine distributes a fixed maximum payout budget across ladder levels based on market stress signals at issuance time, then locks the payout structure after purchase. Five provable mathematical guarantees (bounded payout, bounded loss, simplex preservation, monotonicity, deterministic settlement).
 
-The key design innovation: a mirror-descent allocation engine distributes a fixed maximum payout budget across ladder levels based on market stress signals **at issuance time**, then **locks the payout structure after purchase**. This separation preserves consumer clarity (the user knows exactly what they bought) while allowing the protocol to adapt across issuance series.
+Read: [`MDLW-whitepaper.md`](./MDLW-whitepaper.md)
 
-The framework provides five mathematical guarantees provable without production data:
+### PolyShard: Threshold Key Management Security
 
-- **Bounded issuer payout** — total payout per warrant is capped at M by construction
-- **Bounded buyer loss** — maximum loss equals premium paid, no margin calls
-- **Simplex-preserving weights** — the mirror-descent update stays on the probability simplex
-- **Monotonic reward unlocking** — hitting more levels never reduces payoff
-- **Deterministic settlement** — settlement depends only on series parameters and barrier-hit set
+Information-theoretic security proof for the threshold secret sharing construction used in Dol's treasury key management. Proves that capturing fewer than t shards reveals exactly zero information about the master secret (Shamir impermeability), regardless of computational power including quantum. Includes hand-verifiable and production-scale test vectors.
 
-Read the full document: [`MDLW-whitepaper.md`](./MDLW-whitepaper.md)
+Read: [`polyshard-security.md`](./polyshard-security.md)
+
+---
+
+## How the pieces connect
+
+```
+Dol Phase 1 (live)
+  └── funding-rate harvester, retail UI, smart contracts
+       │
+       ├── CAD-F
+       │     Capital adequacy for the full product suite.
+       │     Market risk + operational risk + governance.
+       │
+       ├── Phase 2 Risk OS
+       │     Closed-loop control: HCR/RCR → state machine → hedge adjustment.
+       │     Proof-first modules ship before data-dependent ones.
+       │
+       ├── MDLW
+       │     Structured derivative product line.
+       │     Fully collateralized, launches outside pooled capital stack.
+       │     Integrates into CAD-F after operational data accumulates.
+       │
+       └── PolyShard
+              Treasury key management security layer.
+              Information-theoretic guarantee (not computational).
+```
+
+---
 
 ## Our vision
 
