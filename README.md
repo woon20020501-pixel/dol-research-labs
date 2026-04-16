@@ -38,6 +38,12 @@ Information-theoretic security analysis for the threshold secret sharing constru
 
 Read: [`polyshard-security.md`](./polyshard-security.md)
 
+### PolyVault: Bio-Hybrid Multi-Layer Security
+
+Formal security analysis of the PolyVault system — a six-layer defense-in-depth architecture combining dual post-quantum encryption (McEliece + Kyber), Shamir secret sharing, fuzzy biometric extraction, SPHINCS+ signatures, and Honey Encryption. Each layer's security property is stated as a theorem with proof sketch and automated verification. Statistical tests confirm the Honey Encryption DTE property and fuzzy extractor uniformity empirically.
+
+Read: [`polyvault-security.md`](./polyvault-security.md)
+
 ---
 
 ## How the pieces connect
@@ -59,9 +65,13 @@ Dol Phase 1 (live)
        │     Fully collateralized, launches outside pooled capital stack.
        │     Integrates into CAD-F after operational data accumulates.
        │
-       └── PolyShard
-              Treasury key management security layer.
-              Information-theoretic guarantee (not computational).
+       ├── PolyShard
+       │     Treasury key management security layer.
+       │     Information-theoretic guarantee (not computational).
+       │
+       └── PolyVault
+              Multi-layer encryption + biometric + signing.
+              Six defense layers, each with formal security theorem.
 ```
 
 ---
@@ -97,6 +107,11 @@ Resolved findings are documented in [`FINDINGS.md`](./FINDINGS.md).
 | MDLW simplex / bounded payout | test_doc4_mdlw.py | formula only | follows from exp-gradient normalization |
 | Panjer severity distributions | test_real_panjer.py | partial | severity shape checked, compound ES underspecified |
 | Shamir info-theoretic security | test_doc1_polyshard.py | theoretical | re-derives Shamir 1979 |
+| Nested-IND-CCA2 (Th1) | test_polyvault_nested_enc.py | implementation | round-trip, tamper detection, layer independence |
+| Fuzzy Extractor uniformity (Th3) | test_polyvault_fuzzy.py | **statistical** | chi-squared + bit balance on 10k extracted keys |
+| SPHINCS+ EUF-CMA structure (Th4) | test_polyvault_sphincs.py | implementation | Lamport OTS: sign/verify, tamper, preimage |
+| Honey Enc. DTE property (Th5) | test_polyvault_honey.py | **statistical** | chi-squared + KS test, 50k wrong-key decryptions |
+| PolyVault composition (Th6) | test_polyvault_composition.py | structural | key independence, union bound, full pipeline |
 
 **Coverage levels:** **full** = independent computation that could falsify the claim. **symbolic** = SymPy derivation confirming stated math. **independent** = different method cross-validates result. **cross-check** = compares numbers within/across documents. **conditional** = verifies "if X then Y" but not that actual params satisfy X. **algorithm** = tests our implementation, not the protocol's. **formula only** = trivially true from formula structure. **tautology** = true by definition. **theoretical** = known theorem. **partial** = some parameters underspecified.
 
