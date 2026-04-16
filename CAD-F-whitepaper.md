@@ -284,18 +284,18 @@ For baseline parameters, eta >= 6 yields eigenvalues {0.52, 0.69, 1.29} — all 
 | Component | Amount (M) |
 |---|---|
 | Market ES x 1.2 | 16.4 |
-| Operational ES x 1.2 | 5.9 |
+| Operational ES x 1.2 | 6.13 |
 | KL-robust ES add-on (eps = 2 x 10^-4) | 0.37 |
 | Knightian add-on (eps = 0.002) | 9.32 |
 | Gas & Liquidity buffer | 0.8 |
-| **Required Capital** | **32.79** |
+| **Required Capital** | **33.02** |
 | Deployed alpha | 24.0 |
 | Deployed beta | 9.0 |
 | Deployed gamma | 6.0 |
 | **Deployed Capital** | **39.0** |
-| **CAR** | **39.0 / 32.79 = 1.19** |
+| **CAR** | **39.0 / 33.02 = 1.18** |
 
-Invariant checks: (A) 39.0 >= 1.2 x 32.79/1.2 = 32.79 — satisfied by construction. (D) alpha = 24.0 <= 0.8 x 39.0 = 31.2 — satisfied.
+Invariant checks: (A) 39.0 >= 33.02 — satisfied. (D) alpha = 24.0 <= 0.8 x 39.0 = 31.2 — satisfied.
 
 ---
 

@@ -109,16 +109,20 @@ Each shard may carry an LWE-based MAC tag z_i = <a_i, y_i> + e_i for integrity v
 | t | 3 |
 | n | 5 |
 | Secret s | 9,876,543,210 |
+| a_1 | 1,234,567,890 |
+| a_2 | 3,456,789,012 |
 
-| Shard i | y_i mod p |
+| Shard i | y_i = f(i) mod p |
 |---|---|
 | 1 | 14,567,900,112 |
-| 2 | 25,810,146,926 |
-| 3 | 40,382,283,940 |
-| 4 | 58,284,311,154 |
-| 5 | 79,516,228,568 |
+| 2 | 26,172,835,038 |
+| 3 | 44,691,347,988 |
+| 4 | 70,123,438,962 |
+| 5 | 102,469,107,960 |
 
 All values fit in 64-bit unsigned integers. Any 3 shards interpolate to exactly 9,876,543,210.
+
+> **Erratum (2026-04-16):** Share values for i=2..5 were corrected. The original values (25,810,146,926 / 40,382,283,940 / 58,284,311,154 / 79,516,228,568) did not match f(x) = s + a_1*x + a_2*x^2 mod p. Identified via independent polynomial evaluation in [`verification/test_doc1_polyshard.py`](./verification/test_doc1_polyshard.py).
 
 ---
 
