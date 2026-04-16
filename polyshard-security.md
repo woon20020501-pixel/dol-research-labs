@@ -75,8 +75,8 @@ Each shard may carry an LWE-based MAC tag z_i = <a_i, y_i> + e_i for integrity v
 
 ## 5. Quantum Resistance
 
-- **Shard security:** The uniformity argument in Lemma 1 is information-theoretic (applies to all adversaries, classical or quantum, with unbounded computation)
-- **MAC tamper resistance:** Reduces to the lattice SIS problem, for which no polynomial-time quantum algorithm is known
+- **Shard security:** The uniformity argument in Lemma 1 is information-theoretic — it follows from the structure of polynomial interpolation over finite fields (Shamir, 1979) and applies to all adversaries, classical or quantum, with unbounded computation. This is not a new result; it is a direct consequence of the original Shamir scheme.
+- **MAC tamper resistance:** Reduces to the lattice SIS problem (Regev, 2005), for which no polynomial-time quantum algorithm is known
 
 ---
 

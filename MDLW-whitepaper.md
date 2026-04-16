@@ -153,7 +153,7 @@ Where eta > 0 is the learning rate. This is an exponentiated-gradient update ove
 
 ## 5. Mathematical Guarantees
 
-This section contains only results that are provable now, without requiring production data.
+This section contains only results that follow from the definitions, without requiring production data.
 
 ### 5.1 Simplex Preservation
 

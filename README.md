@@ -1,5 +1,7 @@
 # Dol Research
 
+![Verification](https://github.com/woon20020501-pixel/dol-research-labs/actions/workflows/verify.yml/badge.svg)
+
 Research artifacts from the Dol team — a consumer-first DeFi yield product built on Pacifica.
 
 ## What is Dol
@@ -14,25 +16,25 @@ The product is live at [dol-finance.vercel.app](https://dol-finance.vercel.app).
 
 ### CAD-F: Capital Adequacy Framework
 
-A mathematical framework for capital adequacy across a suite of DeFi yield and option products. Covers market risk (posterior-robust ES, KL-DRO, Huber contamination), operational risk (Panjer-Poisson LDA), feedback dynamics (premium-capital SDE with provable stability), governance (Sybil-resistant cluster-level concentration), and liquidity solvency (HCR/RCR with circuit-breaker enforcement).
+A mathematical framework for capital adequacy across a suite of DeFi yield and option products. Covers market risk (posterior-robust ES, KL-DRO, Huber contamination), operational risk (Panjer-Poisson LDA), feedback dynamics (premium-capital SDE with derivable stability conditions), governance (Sybil-resistant cluster-level concentration), and liquidity solvency (HCR/RCR with circuit-breaker enforcement).
 
 Read: [`CAD-F-whitepaper.md`](./CAD-F-whitepaper.md)
 
 ### Phase 2: Quantitative Risk Operating System
 
-The specification for Dol's closed-loop risk operating system. Seven mathematical modules (M1-M7) and eight engineering modules (E1-E8), each with provable properties, falsifiable tests, and phased deployment plans. Includes formal theorems for one-step redemption solvency, water-filling budget feasibility, cluster Sybil invariance, and monotone tail risk reduction.
+The specification for Dol's closed-loop risk operating system. Seven mathematical modules (M1-M7) and eight engineering modules (E1-E8), each with stated properties, falsifiable tests, and phased deployment plans. Includes formal definitions for one-step redemption solvency, water-filling budget feasibility, cluster Sybil invariance, and monotone tail risk reduction.
 
 Read: [`phase2-risk-os.md`](./phase2-risk-os.md)
 
 ### MDLW: Mirror-Descent Ladder Warrant
 
-A retail-first structured derivative where users buy warrants that pay incremental rewards as an underlying asset touches predefined downside price levels. A mirror-descent allocation engine distributes a fixed maximum payout budget across ladder levels based on market stress signals at issuance time, then locks the payout structure after purchase. Five provable mathematical guarantees (bounded payout, bounded loss, simplex preservation, monotonicity, deterministic settlement).
+A retail-first structured derivative where users buy warrants that pay incremental rewards as an underlying asset touches predefined downside price levels. A mirror-descent allocation engine distributes a fixed maximum payout budget across ladder levels based on market stress signals at issuance time, then locks the payout structure after purchase. Five mathematical properties verified via automated tests (bounded payout, bounded loss, simplex preservation, monotonicity, deterministic settlement).
 
 Read: [`MDLW-whitepaper.md`](./MDLW-whitepaper.md)
 
 ### PolyShard: Threshold Key Management Security
 
-Information-theoretic security proof for the threshold secret sharing construction used in Dol's treasury key management. Proves that capturing fewer than t shards reveals exactly zero information about the master secret (Shamir impermeability), regardless of computational power including quantum. Includes hand-verifiable and production-scale test vectors.
+Information-theoretic security analysis for the threshold secret sharing construction used in Dol's treasury key management. Based on Shamir's secret sharing scheme (Shamir, 1979): capturing fewer than t shards reveals zero information about the master secret, regardless of computational power. Includes hand-verifiable and production-scale test vectors (Vector B corrected via automated verification).
 
 Read: [`polyshard-security.md`](./polyshard-security.md)
 

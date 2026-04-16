@@ -10,7 +10,7 @@
 
 Dol is a delta-neutral cross-venue funding-rate harvester on Pacifica that pairs a three-tap retail experience with a TradFi-grade quantitative infrastructure. This document specifies Phase 2 of the protocol: a closed-loop **risk operating system** that extends Dol from a single yield engine into an integrated stack of predictive capital allocation, human-readable integrity proofs, actuarial user scoring, and structurally guaranteed redemption.
 
-The system is defined through seven mathematical modules (M1-M7) and eight engineering modules (E1-E8), each with **provable properties, falsifiable tests, and phased deployment plans**. We distinguish strictly between what can be proved today and what requires empirical validation, and we adopt a proof-first ordering: modules that can be formally guaranteed ship before modules that depend on data accumulation.
+The system is defined through seven mathematical modules (M1-M7) and eight engineering modules (E1-E8), each with **stated properties, falsifiable tests, and phased deployment plans**. We distinguish strictly between what can be derived from definitions alone and what requires empirical validation, and we adopt a definition-first ordering: modules whose properties follow from their mathematical structure ship before modules that depend on data accumulation.
 
 The central thesis is simple. Retail users of a yield product cannot personally audit oracle redundancy, hedge adequacy, or liquidity solvency. The protocol must do that mathematically, continuously, and verifiably on their behalf. Phase 2 is the architecture that makes that possible.
 

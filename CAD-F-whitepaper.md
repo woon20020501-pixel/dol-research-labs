@@ -142,7 +142,7 @@ where DVOL_t is Deribit's 30-day BTC implied volatility.
 
 **Sensitivity:** Under +/-20% perturbation of all four copula coefficients, CAR remains in [1.10, 1.28] across the tested grid (4^4 = 256 scenarios). The worst-case (all coefficients shifted to maximize tail dependence) yields CAR = 1.10; the best case yields 1.28.
 
-Upper-tail dependence transitions smoothly from xi^U_0.99 ~ 0.42 (normal) to 0.71 (crisis). The monotonicity d/d_nu ES_q < 0 for nu >= 2 is proven via digamma function analysis; Student-t ES is C^1 in nu.
+Upper-tail dependence transitions smoothly from xi^U_0.99 ~ 0.42 (normal) to 0.71 (crisis). The monotonicity d/d_nu ES_q < 0 for nu >= 2 follows from digamma function analysis (a known result for the Student-t distribution); Student-t ES is C^1 in nu.
 
 ---
 
