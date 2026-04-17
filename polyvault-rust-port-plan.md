@@ -107,17 +107,36 @@ All public functions return a `Result` with an error type that never includes se
 
 ---
 
-## 3. Port sequence (sprints of roughly 1 week each)
+## 3. Port sequence
 
-### Sprint 1 — Foundations and conformance infra
+**Sprint length:** 1 week of focused engineering effort unless otherwise noted. The total estimate below assumes one engineer familiar with Rust crypto and the codebase. Double for a cryptographer-unfamiliar engineer or for a formal review gate between sprints.
+
+### Sprint 0 — Python reference oracle review (PREREQUISITE, 1 week)
+
+**Blocks Sprint 1.** The Rust port treats `verification/polyvault_defi_sim.py` as a reference oracle for byte-level conformance. Before any Rust is written, the Python sim itself must be independently reviewed for correctness. A bit-identical Rust port of a wrong Python sim gives bit-identical wrong behavior.
+
+Pre-work items:
+
+- Code review of `polyvault_defi_sim.py` by someone other than its original author. Specific scrutiny targets:
+  - `compute_bin_edges()` (DTE): prove that the `max(1, round(prob * N_BINS))` edge-allocation loop preserves strict monotonicity `bin_edges[k+1] > bin_edges[k]` for every well-formed corpus, and that the final snap `bin_edges[TOP_K+1] = N_BINS` cannot shrink any earlier edge. Include the proof (≤ 1 page) as a markdown note in `verification/proofs/bin_edges_monotonic.md`.
+  - `stretch_passphrase()`: confirm Argon2id parameters match the main spec (§3.1) byte-for-byte.
+  - Wire-format serializers (`serialize_shard_blob`, `serialize_he_blob`): verify against hand-computed expected outputs for at least one vector per function.
+  - `sim_S4_drbg_independence`: sample-size statistical justification (5000 samples give what confidence for `|r| < 0.05`?).
+- DTE `§9.1` sim-corpus test vectors are pinned at concrete hex values (Sprint 0 verifies the table in the spec matches the sim output on a clean build).
+- Pin `polyvault_defi_sim.py` SHA-256 at the reviewed commit and record in `verification/REFERENCE_ORACLE.md`.
+
+Exit criterion: a written review of the Python sim is filed in `verification/proofs/` (or similar), and no issue identified by that review is outstanding.
+
+### Sprint 1 — Foundations and conformance infra (blocked by Sprint 0)
 
 - Scaffold the crate with the layout above.
 - Vendor `common_passwords_v1.txt` and `wordlist_v1.txt`. Pin SHA-256 constants.
 - Implement `wire_format.rs` (`shard_blob` byte layout) and `dte::wire.rs` (`he_blob` byte layout).
 - Write `tests/shard_blob_conformance.rs` and `tests/he_blob_conformance.rs` that parse known vectors emitted by the Python sim. **CI fails if the Rust port produces a different byte layout for identical inputs.**
 - `independence.rs` test: generate 5000 samples of 5-layer keys via `OsRng`, run pairwise Pearson on the first byte, require `|r| < 0.05`. This is the Rust equivalent of Python S4.
+- **DTE spec §9.2 vector table pinned.** Security Lead selects and pins the production corpus (`common_passwords_v1.txt`). Sprint 1 cannot exit without the production-corpus vector table in DTE spec §9.2 being filled.
 
-Exit criterion: Rust produces byte-identical `shard_blob` and `he_blob` to the Python reference for the full set of conformance vectors.
+Exit criterion: Rust produces byte-identical `shard_blob` and `he_blob` to the Python reference for the full set of conformance vectors (sim-corpus S9.1 AND production-corpus §9.2).
 
 ### Sprint 2 — Custodian authentication (Layer 1)
 
@@ -146,15 +165,31 @@ Exit criterion: cross-language end-to-end signing reconstruction verified on ≥
 
 Exit criterion: bit-identical `he_blob` and tail-generator output across Python and Rust for all test vectors.
 
-### Sprint 5 — Cold backup (Layer 5) and duress (§11.4)
+### Sprint 5 — Cold backup (Layer 5) and duress (§11.4) — scope-limited to stubs
+
+**Scope in this sprint:** cryptographic logic + trait interface + mock implementations only.
+**Out of scope in this sprint:** real HSM integration (AWS CloudHSM / GCP KMS) — tracked as a separate deliverable per §3a below.
 
 - `cold_backup.rs`:
   - Phase-1 AES×AES implementation (bootstrap).
   - Phase-2 trait interface for `McElieceWrapper` and `MlKemWrapper`; initial stubs, to be replaced when PQ crates are selected. This keeps the crate compilable pre-PQ while forcing the layered interface.
-  - **Important:** this crate does NOT hold cold-backup keys. It only holds the encryption/decryption logic. Key fetching is delegated to a pluggable `ColdKeySource` trait with implementations outside this crate (one for AWS CloudHSM, one for GCP KMS; chosen at build time).
-- `duress.rs`: duress-passphrase enrollment creates a second `shard_blob`-format file with the canary plaintext `0xFF * 32`. Unlock path tries real first, falls back to duress on AEAD failure, returns the canary share silently.
+  - **Important:** this crate does NOT hold cold-backup keys. It only holds the encryption/decryption logic. Key fetching is delegated to a pluggable `ColdKeySource` trait; implementations live in separate crates (see §3a).
+- `duress.rs`:
+  - Design A (on-device canary) per §11.4.2: duress-passphrase enrollment creates a second `shard_blob`-format file with the canary plaintext `0xFF * 32`. Unlock path tries real first, falls back to duress on AEAD failure, returns the canary share silently.
+  - Design B (orchestrator-side fake-success UX) per §11.4.3: client-side emits a signed duress flag over a **separate** key (provisioned at Sprint 1); orchestrator-side handling (fake receipt, suppression of broadcast, governance revocation) is a separate integration tracked with the orchestrator team, not with this crate. This crate provides the duress-flag-emission API only.
 
-Exit criterion: the full 3-facility recovery flow round-trips through mock `ColdKeySource` implementations. Duress canary matches Python S10 behavior.
+Exit criterion: full 3-facility recovery flow round-trips through **mock** `ColdKeySource` implementations. Duress canary matches Python S10 behavior. Duress-flag emission API tested and documented for the orchestrator team.
+
+### Sprint 5a, 5b (PARALLEL TRACK) — Real HSM integrations (2 weeks each)
+
+These are implemented in separate crates (`bot-polyvault-aws` and `bot-polyvault-gcp`), on a parallel track after Sprint 5 exits. Each integration:
+
+- Implements the `ColdKeySource` trait using the respective cloud HSM's native API.
+- Maps authentication (IAM role / service account) and error semantics to the trait's error type.
+- Is tested against a staging/sandbox HSM instance with a disposable key.
+- Is reviewed by Security Lead before any production key material is ever placed in that facility.
+
+Each HSM integration is ~2 weeks of engineering, not overlapping with the main Rust port sprints. Can be scheduled after Sprint 5 or deferred until closer to Phase-2 transition.
 
 ### Sprint 6 — Audit signatures (Layer 6) + rotation primitives
 
@@ -173,6 +208,23 @@ Exit criterion: SPHINCS+ sign/verify round-trip; PSS and full rotation integrati
 - CI gates added to the `dol` main branch: all conformance + independence + end-to-end + fuzz tests must pass on every merge.
 
 Exit criterion: `cargo test --workspace` green on a clean checkout; `cargo fuzz run parse_shard_blob -- -runs=1000000` green.
+
+### Sprint 7.5 — External audit + remediation (2–3 weeks, hard block before Sprint 8)
+
+The crate has not touched production key material before this gate. Sprint 7.5 is where an external audit firm reviews the entire `bot-polyvault` crate.
+
+Scope:
+
+- Argon2id / HKDF plumbing correctness under adversarial inputs.
+- Wire-format parsers under malformed/adversarial bytes (complements the fuzz work from Sprint 7 with human review).
+- Secret-material handling in error paths, panic paths, and edge-case returns.
+- DTE bin-edges logic against the monotonicity proof filed in Sprint 0.
+- Independence of the duress-flag-signing key from the unlock pipeline.
+- Absence of unsafe blocks and validation of every public API's invariant contract.
+
+Remediation: audit findings are triaged and classified (blocker / major / minor). All blockers must close before Sprint 8 begins. Majors are closed before any production traffic; minors are tracked in FINDINGS.md.
+
+Exit criterion: audit report received; no blocker findings open; majors triaged with a closure plan.
 
 ### Sprint 8 — Integration with `bot-nav` and treasury operations
 
@@ -231,17 +283,24 @@ The Rust port must interact with two contract surfaces:
 
 | Sprint | Focus | Effort (1 eng) |
 |---|---|---|
-| 1 | Foundations + conformance | 1 week |
+| 0 | Python reference oracle review (prerequisite) | 1 week |
+| 1 | Foundations + conformance + production-corpus pin | 1 week |
 | 2 | Argon2id + unlock | 1 week |
 | 3 | AEAD + Shamir | 1 week |
 | 4 | HE + DTE | 1–2 weeks |
-| 5 | Cold backup + duress | 1–2 weeks |
+| 5 | Cold backup + duress (stubs only, no real HSM) | 1–2 weeks |
+| 5a | Real AWS CloudHSM integration (parallel track) | 2 weeks |
+| 5b | Real GCP KMS integration (parallel track) | 2 weeks |
 | 6 | Audit sig + rotation | 1 week |
 | 7 | Hardening | 1 week |
+| **7.5** | **External audit + remediation (hard block before Sprint 8)** | **2–3 weeks** |
 | 8 | bot-nav integration | 1–2 weeks |
-| **Total** | | **~9–11 weeks** |
+| **Total (serial path, 1 eng)** | | **~13–17 weeks** |
+| **Total (with parallel HSM track)** | | **~13–17 weeks + 2 weeks HSM overlap** |
 
-Assumes one engineer familiar with Rust crypto and the codebase. Double the estimate for a cryptographer-unfamiliar engineer or for a formal review gate between sprints.
+Assumes one engineer familiar with Rust crypto and the codebase. Double the serial-path estimate for a cryptographer-unfamiliar engineer. The HSM-integration tracks (5a, 5b) can run in parallel with Sprints 6 and 7 if a second engineer is available; otherwise add them serially after Sprint 5.
+
+**The audit buffer (Sprint 7.5) is not optional.** Production key material never touches the Rust code before an external firm reviews the entire crate. A compressed audit timeline has repeatedly been the source of shipped crypto bugs — this plan budgets real calendar time for it.
 
 ---
 
@@ -252,6 +311,28 @@ Assumes one engineer familiar with Rust crypto and the codebase. Double the esti
 - After Sprint 7: full crate reviewed by external audit firm before Sprint 8 integration into `bot-nav`.
 - Before Phase 1 ceremony: audit results resolved; ceremony runbook dry-run executed by team.
 - Before Phase 2 transition: PQ primitive selection + HSM contracts signed off by governance.
+
+---
+
+---
+
+## 12. Python reference oracle — trust and scope
+
+The Rust port treats `verification/polyvault_defi_sim.py` as the byte-level reference for conformance. This is efficient but introduces an obvious trust-transitivity question: **a bit-identical Rust port of a buggy Python sim produces bit-identical buggy output.** Sprint 0 exists specifically to break that transitivity.
+
+What Sprint 0 verifies in the Python sim:
+
+1. **`compute_bin_edges()` monotonicity proof.** Short (≤ 1 page) mathematical argument showing that for every well-formed corpus (weights summing to the common mass, `max(1, round(·))` allocations, tail padded to `N_BINS - bin_edges[TOP_K]`), the resulting `bin_edges` is strictly monotonic and bounded by `[0, N_BINS]`. Filed in `verification/proofs/bin_edges_monotonic.md`. Without this, adversarial corpora could produce overlapping bins (a subtle DTE integrity failure).
+
+2. **Argon2id parameter conformance.** Assert in CI that `ARGON2ID_M_COST_PROD`, `ARGON2ID_T_COST_PROD`, `ARGON2ID_P_COST_PROD` match main-spec §3.1 byte-for-byte. Regression-guard against a maintainer accidentally dropping these values during refactor.
+
+3. **Wire-format hand-verification.** At least one `shard_blob` and one `he_blob` computed by hand (with an independent serializer) must match the sim's output at a byte level. The hand-computed vectors live in `verification/proofs/wire_format_hand_vectors.md`.
+
+4. **Statistical justifications.** Every chi-squared / Pearson / KS assertion in the sim has a short note explaining the chosen `α`, `n`, and false-positive budget. For S4's `|r| < 0.05` at `n=5000`: `P(|r| > 0.05 | ρ=0) ≈ 0.000008` under normality approximation, so CI flake rate is ≤ 1e-5 per run — acceptable for a CI gate, but documented.
+
+5. **Reference-oracle pinning.** At the end of Sprint 0, the reviewed commit SHA of `polyvault_defi_sim.py` is pinned in `verification/REFERENCE_ORACLE.md`. Any subsequent change to the sim either carries a matching Rust-side update (bumping conformance vectors) or an explicit migration note.
+
+**Limits of Sprint 0.** Sprint 0 does not prove the sim is cryptographically correct — it verifies that the sim says what it means to say, and that its outputs are reproducible. Cryptographic correctness of the architecture itself is the job of the specs (`polyvault-security.md`, `polyvault-dte-spec.md`) and the external audit (Sprint 7.5).
 
 ---
 

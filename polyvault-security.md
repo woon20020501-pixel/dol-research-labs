@@ -240,9 +240,18 @@ Why `N = 2^32` (not `2^20`): denser common region reduces adjacent-bin collision
 | Passphrase drawn from `D` | Custodian uses a 40-char random string | HE bucket is `"<tail>"`; all wrong-key decrypts produce `"<tail>"` marker. Acceptable — attacker still can't verify without token. |
 | `COMMON_LIST` refreshed periodically | 2020 list used in 2030 | Distribution drift; HE hiding degrades. Runbook §11 schedules 12-month refresh. |
 
-### 5.4 What HE does *not* replace
+### 5.4 What HE does *not* replace — and its computational-security limits
 
-HE is *not* a substitute for the slow KDF (§3). HE rate-limits attackers who have the HE blob but not the token; slow KDF rate-limits attackers who also have the token. Both are needed in different failure modes.
+**HE does not replace the slow KDF (§3).** HE rate-limits attackers who have the HE blob but not the token; slow KDF rate-limits attackers who also have the token. Both are needed in different failure modes.
+
+**HE is not a computational-secrecy primitive.** The PRF uses only 4 bytes of HMAC-SHA256 output (see `polyvault-dte-spec.md` §7.1), so the effective PRF search space is `2^32`. A GPU-equipped adversary can enumerate all `2^32` candidate `prf(he_key) mod N_BINS` values in wall-clock minutes. This is **intentional**: HE provides *distribution-indistinguishability* (every guess yields a plausible passphrase), not brute-force hardness.
+
+The correct reading of HE's security contribution:
+
+- **What HE gives:** no decryption oracle. An offline attacker with the `he_blob` but without the hardware token sees only a stream of plausible common-password decoys; there is no way to tell which guess corresponds to the real passphrase without also reaching Layer 2 (AEAD shard lock) and Layer 4 (Shamir threshold).
+- **What HE does NOT give:** per-guess computational cost. Each HE decryption is one HMAC-SHA256 call (microseconds). The only computational barrier in the custodian-auth path is Argon2id (Layer 1), which charges ~100 ms per guess with production parameters.
+
+Do not read "HMAC-SHA256 PRF → 256-bit security" into this primitive. The 4-byte truncation is deliberate and the security argument is distributional, not computational.
 
 ---
 
@@ -287,7 +296,10 @@ The project commits to a tiered DKG roadmap. The tier active at any time depends
 - Polynomial coefficients and shards are output as QR codes on paper; never touch a network interface.
 - Shards are distributed to custodians in tamper-evident envelopes.
 - Dealer device: storage physically destroyed in view of witnesses at ceremony close; destruction certificate signed by all witnesses.
+- **Feldman VSS commitments** are emitted by default in v3.2 Phase 1 (see next paragraph).
 - Transcript (not including secret material) is signed by all witnesses and pinned in governance.
+
+**Feldman VSS in Phase 1.** The dealer emits public commitments `C_j = G · a_j` for every polynomial coefficient (including `C_0 = G · k*`). Commitments are pinned in the ceremony transcript. Each custodian independently verifies `G · y_i == Σ i^j · C_j` on their own device; no `k*` reconstruction on a shared machine is needed for post-ceremony consistency checking. `C_0` also lets governance verify that the ceremony produced the key whose on-chain owner address was pre-registered. Discrete-log hardness of secp256k1 ensures the commitments leak nothing about `k*`. This is what v3.1 called "Option B"; in v3.2 it is default for Phase 1 and required for Phase 2/3 as well. Ceremony runbook §3.3a gives the wire-level procedure.
 
 **Transition Phase 1 → Phase 2** is itself a ceremony: regenerate `k*` inside Phase 2 HSMs, re-Shamir, redistribute new shards, on-chain rotate to the new address, destroy Phase 1 shards under witness. The old `k*` must not be imported into the new HSMs (treat Phase 2 as a fresh start).
 
@@ -368,6 +380,20 @@ If `E_inner` and `E_outer` are IND-CCA2 with adversary advantages `Adv_inner, Ad
 | Algorithm diversity in production | Team extends Phase-1 AES×AES bootstrap indefinitely | Any AES advance breaks both layers at once; §11 rotation schedule forces the issue |
 | AEAD tag verified before plaintext surfaces | Custom decryptor logs on tag-fail | Side channel |
 | Facility-C access gate enforced | Governance-multisig policy misconfigured as single-signer | `C_outer` leakable by one party |
+
+### 7.7 On-chain PQ asymmetry — an explicit scope limit
+
+The cold-backup construction (§7.1) is specifically designed to be post-quantum for the Phase-2+ algorithm-diverse McEliece ∘ ML-KEM variant. This matters because cold-backup ciphertexts persist for years and may be present in archives that future adversaries can read.
+
+**However, the on-chain signing key itself remains classical.** The `k*` used for EVM transaction signing is a secp256k1 scalar, and secp256k1 ECDSA is not post-quantum: a sufficiently capable quantum adversary can recover the private key from any on-chain signature using Shor's algorithm. This is a property of the **chain**, not of PolyVault.
+
+The asymmetry is intentional and must be clearly documented:
+
+- **PolyVault's PQ protection applies to:** (1) cold-backup ciphertexts, which are opaque byte-strings held offline, and (2) the audit trail (§8), which is SPHINCS+-signed and therefore hash-based.
+- **PolyVault's PQ protection does NOT apply to:** the on-chain signing operation. Once `k*` signs a transaction and the signature appears on-chain, a quantum adversary with access to that signature and the public key can recover `k*`.
+- **The only defense for hot signing against quantum attack is chain migration.** EVM does not currently support PQ signature verification; when it does (e.g., via a precompile or an L2 with PQ-native signatures), Dol must migrate. Until then, the residual risk is bounded by two factors: (a) current quantum capability is far below what Shor's algorithm on secp256k1 requires; (b) a compromise of `k*` via quantum attack would be detectable at the on-chain transaction level (any attacker-forged transaction would trigger the audit/pause infrastructure of §8, §11.3).
+
+The deployment checklist (§13.6) requires a filed chain-migration plan. The research roadmap outside this document discusses PQ-native chains and how the Dol treasury would migrate.
 
 ---
 
@@ -516,25 +542,64 @@ Both paths are simulation-verified:
 | HE distribution `D` shifts substantially | Non-urgent re-wrap; schedule within 30 days |
 | CI independence test (S4) fails | Block all keygen. Rotate all keys generated in suspect window. |
 
-### 11.4 Duress passphrase — two designs (review finding 6)
+### 11.4 Duress passphrase — layered defense
 
-**Design A — On-device canary (network-independent, recommended).**
+A single duress design is not sufficient; the two designs below address complementary adversary models and **both must be deployed** in any production release.
 
-Each custodian enrolls a second passphrase `pw_duress`. On the device, `pw_duress` decrypts via the same Layer 1 pipeline but unlocks a **canary blob** whose plaintext is a constant value (e.g., `0xFF^32`). This canary is a valid `F_n` scalar but is **not on the real polynomial**, so threshold reconstruction that includes it yields `k_recovered ≠ k*`. The resulting signature will not verify against the on-chain address — transaction submission fails deterministically.
+#### 11.4.1 Attacker model
 
-No network dependency. A coercer isolating the device still gets a "successful-looking" signing ceremony whose output is useless.
+A coercer forces a custodian to execute a signing. The coercer's goal is to cause a valid on-chain transaction to be broadcast. The custodian's goal is to appear compliant while producing output that fails. The adversary's observation surface includes: (a) the signing UI shown on the custodian's device, (b) the transaction broadcast and its on-chain result, (c) the coerced custodian's behavior under continued threat.
 
-Storage: each custodian stores `shard_blob` *and* `duress_blob`, both AEAD-encrypted. The unlock pipeline tries `shard_blob` first, falls back to `duress_blob` on AEAD failure. Wrong-passphrase and duress-passphrase cases are observationally indistinguishable to the coercer (both pass the unlock code path silently).
+A duress design is *effective* only if the coercer cannot easily distinguish a real signing from a duress signing within the time they retain leverage over the custodian. "Transaction submission fails deterministically" is a correct defensive property but is visible to the coercer; a sophisticated adversary waits for broadcast confirmation and escalates on failure.
 
-**Simulation S10** verifies the canary behavior: 1, 2, or 3 coerced custodians all produce `k_recovered ≠ k*`. With three duress passphrases, the Lagrange reconstruction of a constant (`0xFF^32` at every `x`) yields that constant — the attacker obtains a value that is trivially not the on-chain owner.
+#### 11.4.2 Design A — On-device canary (required)
 
-**Design B — Network-gated alert (requires connectivity).**
+Each custodian enrolls a second passphrase `pw_duress`. On the device, `pw_duress` decrypts via the same Layer 1 pipeline but unlocks a **canary blob** whose plaintext is a constant value (`0xFF^32`). This canary is a valid `F_n` scalar but **not on the real polynomial**, so threshold reconstruction that includes it yields `k_recovered ≠ k*`.
 
-`pw_duress` decrypts the real shard (so the local ceremony proceeds), *and* additionally emits a signed alert to the orchestrator. The orchestrator responds by triggering an emergency revocation contract.
+**Storage.** Each custodian stores `shard_blob` and `duress_blob`, both AEAD-encrypted in the same wire format (§3.2). The unlock pipeline tries `shard_blob` first, falls back to `duress_blob` on AEAD failure. The two code paths are observationally indistinguishable to the coercer.
 
-Works only if the device is network-reachable when the duress passphrase is entered. A sophisticated coercer who isolates the device first defeats this design.
+**Simulation S10** verifies: 1, 2, or 3 coerced custodians all produce `k_recovered ≠ k*`; with three duress passphrases the Lagrange reconstruction of the constant function at every `x` yields that constant, which is trivially not the on-chain owner.
 
-**Recommendation:** Design A (on-device canary) for every deployment. Optionally combine with Design B: if network is available, alert; if not, fall back to canary.
+**Limitation.** Design A alone protects only until broadcast. A coercer who watches the mempool / block explorer sees the invalid signature. Design A must be paired with Design B (below) to cover the broadcast-observation case.
+
+#### 11.4.3 Design B — Orchestrator-side fake-success UX (required where network is available)
+
+When `pw_duress` is entered on a networked custodian device, the client emits a signed duress flag to the Dol orchestrator. The orchestrator then:
+
+1. **Suppresses the real on-chain broadcast.** The transaction never leaves the orchestrator.
+2. **Synthesizes a fake success receipt for the coerced UI.** The custodian's device shows a transaction-accepted modal with a plausible transaction hash (a value indistinguishable from a real hash but not corresponding to any actual chain event). The UI also shows a fake block-explorer link whose target is a server-controlled static page that displays the fake transaction as "pending → confirmed" for as long as the coerced session is active.
+3. **Locks out the custodian's device for the duress-active window** (default 72 h): subsequent signing attempts from that device also route through the fake UX.
+4. **Triggers emergency governance revocation** out-of-band: pauses the on-chain emergency-pause contract (§13.6), notifies other custodians via side-channels, rotates `k*`.
+
+The fake-success UX is the point of Design B. Without it, a coercer watching the chain detects the absence of the broadcast and escalates. With it, the coercer observes what looks like a successful signing for hours; by the time they realize otherwise, the custodian is physically safe and the key has been rotated.
+
+**Failure mode.** If the device is offline when duress is entered, Design B is silent and the attacker sees only Design A's failed-broadcast outcome. Mitigation: (a) provisioning policy requires custodian devices to be online whenever signing is permitted (no offline signing for DeFi treasury); (b) if a signing request originates from an offline device, the orchestrator displays the fake-success UX *speculatively* on the next reachable custodian device to buy time.
+
+#### 11.4.4 Mixed duress + real passphrase reconstruction
+
+An attacker may coerce a subset of custodians while others cooperate normally. The space of outcomes is:
+
+| Real shares | Duress (canary) shares | Reconstruction outcome |
+|---|---|---|
+| 3 | 0 | `k_recovered = k*` — legitimate signing path |
+| 2 | 1 | `k_recovered ≠ k*` — poisoned; signature fails (Design A behavior) |
+| 1 | 2 | `k_recovered ≠ k*` — poisoned |
+| 0 | 3 | `k_recovered` = canary constant (`0xFF^32 mod n`) — poisoned; trivially wrong |
+
+**3 real + 0 duress means legitimate recovery.** This is by design: a full quorum of legitimately-authorized custodians must always be able to sign. If the attacker coerces only 1 custodian out of 5 (holds their duress passphrase), they need 2 more *real* shares to reach `t=3`. If they have those real shares from physical device theft plus the coerced duress, reconstruction is 2 real + 1 duress → poisoned. If they have 3 real shares (threshold reached without any duress input), they do not need the coerced custodian at all.
+
+**The duress design does not prevent `t` colluding or compromised custodians from signing** (threshold is by design). It protects against the specific scenario: coercer has `≥ 1` custodian under duress but not `t` full custodian compromises.
+
+**Combinatorial adversary strategy.** From `{3 real + 1 duress}` a coercer who possesses all 4 shares can choose any 3-subset. Of `C(4,3)=4` subsets, one (`{real,real,real}`) recovers `k*`, three include the duress share. If the coercer does not know which share is duress (true if the custodian does not signal which passphrase they provided), they must try all 4 subsets in expectation; each wrong reconstruction is a failed signature, which Design B's fake-success UX still masks. If the coercer *does* know which share is duress (custodian told them under further threat), Design A alone is insufficient and the full `k*` recovery proceeds — at which point Design B's orchestrator-side revocation (triggered by the duress flag already emitted) is the remaining defense.
+
+This scenario — coercer accumulating real shares from physical theft while coercing duress from a surviving custodian — is the apex case of §9.2-S8 in the original threat model. Defense is Design B's orchestrator revocation combined with on-chain emergency pause.
+
+#### 11.4.5 Required deployment posture
+
+- **Design A (canary):** required on every custodian device. No exceptions.
+- **Design B (orchestrator fake UX + revocation):** required wherever the custodian device has network connectivity. For air-gapped custodian devices, operator signs off on the residual risk in the deployment checklist.
+- **Duress flag transmission** (custodian → orchestrator): signed with a custodian-specific key derived separately from the unlock pipeline so that a device compromise does not also forge duress flags.
+- **Out-of-band custodian alerts**: on duress flag receipt, orchestrator notifies other custodians via two pre-agreed side channels (e.g., encrypted messaging + phone call) so that surviving custodians learn of the event independent of the attacker's device.
 
 ### 11.5 When independence failure is detected
 
@@ -604,17 +669,29 @@ Pre-production gate. Each item maps to a section. Each is a hard block; no "will
 
 - [ ] `hw_token_secret` in attested hardware; no software-token fallback.
 - [ ] **Mobile signing forbidden.** Custodian signing devices are desktop or laptop with ≥ 8 GiB RAM free at signing time.
-- [ ] Duress passphrase Design A (on-device canary) enrolled per custodian (§11.4).
+- [ ] Duress Design A (on-device canary) enrolled per custodian (§11.4.2) — **required**.
+- [ ] Duress Design B (orchestrator-side fake-success UX) wired for every networked custodian device (§11.4.3) — required where network is available.
+- [ ] Duress-flag signing key provisioned separately from unlock pipeline (§11.4.5).
+- [ ] Two pre-agreed out-of-band alert channels for duress events (§11.4.5).
 - [ ] Signing-environment policy: no screen-share, no accessibility services, no unattended reboot during ceremony-open intervals.
 
-### 13.6 CI and operational invariants
+### 13.6 Legal and jurisdictional
+
+- [ ] Legal review completed for every operational jurisdiction confirming that non-escrow threshold custody is permitted (some jurisdictions require law-enforcement escrow for cryptographic key material).
+- [ ] Governance multi-sig signers' jurisdictional mix reviewed so no single-jurisdiction order can compel access to `C_outer`.
+- [ ] HSM vendor contracts reviewed for jurisdictional-disclosure clauses (e.g., subpoena response without customer notification) — flag and mitigate where incompatible.
+- [ ] Corpus source for PassphraseDTE (`polyvault-dte-spec.md` §12) reviewed for IP and ethics posture in each operational jurisdiction.
+
+### 13.7 CI and operational invariants
 
 - [ ] Independence CI test (S4) green on every build.
-- [ ] Wire-format conformance tests (shard_blob, he_blob) green on every build.
-- [ ] End-to-end simulation tests (`polyvault_defi_sim.py`) green on production runtime.
+- [ ] Wire-format conformance tests (shard_blob, he_blob, DTE test vectors) green on every build.
+- [ ] End-to-end simulation tests (`polyvault_defi_sim.py`, 11+ tests) green on production runtime.
+- [ ] Python reference oracle itself externally reviewed (not just the Rust port) — see `polyvault-rust-port-plan.md` §12 for scope.
+- [ ] DTE `compute_bin_edges()` monotonicity proof on file (invariant holds for all valid corpus inputs, not just the simulation's).
 - [ ] On-chain emergency pause contract deployed and wired to off-chain alert channel.
 - [ ] SPHINCS+ audit log in append-only storage; governance verifier operational and public.
-- [ ] Runbook dry-run with all custodians completed; rotation drill performed.
+- [ ] Runbook with all custodians executed (real ceremony, not dry-run — §6 of runbook); commitment verification completed.
 - [ ] Post-quantum upgrade plan filed (chain migration; cold-backup Phase transition).
 - [ ] TSS upgrade evaluated; Shamir-reconstruct `~25 ms` window accepted as residual risk, or migration plan active.
 

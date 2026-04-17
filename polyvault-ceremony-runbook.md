@@ -73,9 +73,17 @@ A Tails-based custom live image with the following inclusions:
 - QR-code generator (`qrencode`)
 - **No network drivers loaded at boot.** Kernel config excludes WiFi and Ethernet modules. Attempts to load them refuse.
 
-### 2.2 Publish image hash
+### 2.2 Publish image hash AND per-script hashes
 
-The image's SHA-256 is posted to governance ≥ 7 days before the ceremony. Witnesses verify by independently downloading and hashing.
+The image's SHA-256 is posted to governance ≥ 7 days before the ceremony. In addition to the image hash, the following individual scripts inside the image each have their SHA-256 pinned and published separately in the same governance notice:
+
+- `ceremony_generate.py` — the key-generation script
+- `entropy_check.py` — the TRNG statistical-test script
+- `polyvault_defi_sim.py` — the reference oracle
+
+Per-script hashes let an auditor verify "this specific script ran" from a single line in the ceremony transcript, without needing to re-extract and hash the full image. The image hash transitively covers the scripts, but having the script hash alone in the transcript makes audit far cheaper.
+
+Witnesses verify all hashes by independently downloading the image and extracting the scripts. Mismatch on any hash is a ceremony abort.
 
 ### 2.3 Do not pre-generate
 
@@ -136,9 +144,31 @@ This script, which is vendored in the image and reviewed in advance:
    - Outputs: `shard_i_raw.bin` (32 bytes `y_i` as big-endian) + `argon2_salt_i.bin` (32 bytes) + `custodian_i_id.txt`.
 6. Computes SHA-256 of all outputs and of `k*` (for audit purposes). `k*` itself is NOT recorded to disk — only its hash.
 7. Prints per-custodian materials as QR codes (one per custodian: `shard_i_raw` + `argon2_salt_i` encoded together).
-8. Prints the **ceremony transcript** to paper: dealer name, witness names, custodian list, `k*` SHA-256 (not `k*`), output SHA-256s, per-shard Feldman commitment `g^{coeff}` values if Option B tier is active.
+8. **Computes Feldman VSS commitments** and prints them to the transcript (see §3.3a below). These commitments are PUBLIC; they let each custodian independently verify that their shard is consistent with the polynomial, without revealing any other coefficient.
 
 Witnesses observe screen; transcript captures each on-screen confirmation.
+
+### 3.3a Feldman VSS commitment emission (required since v3.2)
+
+The dealer also emits a short public commitment set, which every custodian (and any third party) can later use to verify their shard's consistency with the polynomial without reconstructing `k*`. Commitments are points on secp256k1:
+
+```
+C_j  =  G · a_j       for j ∈ {0, 1, ..., t-1}
+```
+
+where `G` is the secp256k1 generator, `a_0 = k*`, and `a_1, a_2` are the polynomial's non-constant coefficients.
+
+Verification of shard `i` against the commitments:
+
+```
+G · y_i  ==  Σ_{j=0}^{t-1}  i^j · C_j   (point equation over secp256k1)
+```
+
+`G · y_i` is the public point derived by scalar-multiplying `G` by the shard; the right side is a linear combination of the public commitments. If the equation holds, the shard lies on the committed polynomial.
+
+**What this unlocks.** Post-ceremony verification (§6.2) no longer requires reconstructing `k*` on a general-purpose machine. Each custodian independently runs the point equation on their own signing device with their own shard; Security Lead observes all five confirmations. `k*` never reassembles in the field.
+
+**Storage.** `C_0, C_1, ..., C_{t-1}` are printed to the transcript, photographed, and pinned in governance. They are public values — publishing them leaks nothing about `k*` because they are one-way commitments (recovering `a_j` from `C_j` is the discrete-log problem).
 
 ### 3.4 Distribution (minutes 60–75)
 
@@ -146,7 +176,9 @@ Witnesses observe screen; transcript captures each on-screen confirmation.
 2. Custodians `i = 1..5` receive their envelopes one at a time. Each custodian signs the chain-of-custody log, stating receipt and envelope integrity.
 3. Envelopes are NOT opened in the ceremony room. Custodians leave with sealed envelopes.
 
-### 3.5 Per-custodian post-ceremony (each custodian, within 24 hours, on their signing device)
+**Transit policy (tightened).** Custodians MUST NOT make intermediate stops (café, restaurant, errand) between the ceremony venue and their provisioning location. Envelope remains on the custodian's physical person at all times. Any break of seal discovered at any point is an immediate Security Lead notification and temporary suspension of that custodian's signing authority pending investigation. Target provisioning window is **2–4 hours** from ceremony close, not 24.
+
+### 3.5 Per-custodian post-ceremony (each custodian, within 2–4 hours, on their signing device)
 
 Each custodian, on their own signing laptop, runs:
 
@@ -161,14 +193,15 @@ polyvault-cli provision \
 This performs, locally on the custodian's device:
 
 1. Scans the QR codes from the envelope (camera input or pasted file), recovers `y_i` and `argon2_salt_i`.
-2. Reads `hw_token_secret` via the token's OTP or attestation interface (never leaves token).
-3. Computes `unlock_key = HKDF(hw_token_secret ∥ Argon2id(passphrase, argon2_salt, m=256MiB, t=3, p=1))`.
-4. AEAD-encrypts `y_i` to produce `shard_blob` (wire format v1, 98 bytes).
-5. Optionally enrolls a duress passphrase (§11.4), producing `duress_blob`.
-6. HE-encrypts the passphrase to produce `he_blob` (wire format v1, 22 bytes).
-7. Writes the three blobs to the device's secure storage.
-8. **Securely destroys the scanned envelope content** (overwrites + filesystem-level delete + media erasure on the scan source).
-9. Shreds the paper envelope contents on camera, uploads destruction evidence to governance.
+2. **Verifies shard consistency against Feldman commitments** (§3.3a). Computes `G · y_i` and `Σ i^j · C_j`; aborts provisioning if they do not match.
+3. Reads `hw_token_secret` via the token's OTP or attestation interface (never leaves token).
+4. Computes `unlock_key = HKDF(hw_token_secret ∥ Argon2id(passphrase, argon2_salt, m=256MiB, t=3, p=1))`.
+5. AEAD-encrypts `y_i` to produce `shard_blob` (wire format v1, 98 bytes).
+6. Enrolls a duress passphrase (§11.4; **required**, not optional), producing `duress_blob`.
+7. HE-encrypts the real passphrase to produce `he_blob` (wire format v1, 22 bytes).
+8. Writes the three blobs to the device's secure storage.
+9. **Securely destroys the scanned envelope content** (overwrites + filesystem-level delete + media erasure on the scan source).
+10. Shreds the paper envelope contents on camera, uploads destruction evidence to governance.
 
 ### 3.6 Dealer device destruction (ceremony close, minutes 75–90)
 
@@ -213,12 +246,19 @@ TRNG:                <make model serial, entropy test pass/fail>
 USB image SHA-256:   <hash, pre-published date>
 Printer:             <make model serial>
 
+Scripts run (per-script SHA-256)
+--------------------------------
+ceremony_generate.py   sha256:  <64-hex>
+entropy_check.py       sha256:  <64-hex>
+polyvault_defi_sim.py  sha256:  <64-hex>
+
 Configuration
 -------------
 (t, n):              <(3, 5) or other>
-DKG tier:            <Phase 1>
+DKG tier:            <Phase 1> / <Phase 1 with Feldman VSS>
 KDF:                 Argon2id m=262144 t=3 p=1
 DTE corpus hash:     <sha256 of common_passwords_v1.txt>
+wordlist hash:       <sha256 of wordlist_v1.txt>
 
 Outputs (hashes only — material itself in sealed envelopes)
 -----------------------------------------------------------
@@ -229,10 +269,13 @@ shard_3 SHA-256:     <64-hex>
 shard_4 SHA-256:     <64-hex>
 shard_5 SHA-256:     <64-hex>
 
-Feldman commitments (if tier supports):
-  g^a_0 = <point>
-  g^a_1 = <point>
-  g^a_2 = <point>
+Feldman commitments (emitted by default in v3.2 Phase 1):
+  C_0 = G · k*  = <secp256k1 compressed point, 33 hex bytes>
+  C_1 = G · a_1 = <secp256k1 compressed point>
+  C_2 = G · a_2 = <secp256k1 compressed point>
+  (C_0's derived on-chain address): <0x...>
+  (pre-registered owner address):   <0x...>
+  (match?): <yes/no — must be yes>
 
 Distribution
 ------------
@@ -288,10 +331,44 @@ An abort burns the equipment: ceremony laptop, USB, printer — all destroyed pe
 
 Within 7 days of ceremony close:
 
-1. Each custodian runs a local self-test: unlock with their passphrase, produce a share, confirm `(x, y)` matches their QR output. Report outcome to Security Lead.
-2. Security Lead coordinates a dry-run signing: all 5 custodians unlock their shards, produce shares, run Lagrange on a shared witness-computer **with camera attestation**, confirm reconstructed scalar's `sha256` matches transcript's `k* SHA-256`. The reconstructed scalar is then zeroized. **This is the only time after the ceremony that `k*` reassembles.**
-3. Dry-run signing produces an attestation signature on a non-critical on-chain message (e.g., a governance-proposal acknowledgment). Confirm the signature verifies under the intended on-chain owner.
-4. If any step fails: re-run the ceremony with a fresh key and destroy the Phase-1 output. Do NOT try to "patch" a partial ceremony.
+### 6.1 Per-custodian self-verification
+
+Each custodian, on their own provisioned device:
+
+1. Unlocks with their real passphrase; confirms shard unlock produces the `(x, y_i)` from their envelope.
+2. Runs the Feldman-commitment verification locally: computes `G · y_i` and `Σ i^j · C_j` (the commitments `C_j` are public, from the ceremony transcript), confirms equality.
+3. Reports pass/fail to Security Lead via a signed message.
+
+This step never reassembles `k*`. All computation is local to one custodian's device.
+
+### 6.2 Aggregate consistency verification (no `k*` reconstruction)
+
+Security Lead does NOT reassemble `k*` on a general-purpose laptop during post-ceremony verification. The Feldman commitment structure makes reconstruction unnecessary for consistency checking:
+
+**Procedure:**
+
+1. Security Lead collects each custodian's signed `(i, G · y_i)` pair — the **point** `G · y_i`, not the scalar `y_i`.
+2. For each `i`, verifies the Feldman equation `G · y_i  ==  Σ i^j · C_j` using the public commitments from the transcript.
+3. If all 5 custodians' points verify against the published commitments, the polynomial is consistent: every shard lies on the same degree-`(t−1)` polynomial whose commitment set was published at ceremony close.
+4. For a full liveness check, Security Lead additionally verifies that `C_0 = G · k*` corresponds to the **intended on-chain owner address** — i.e., that the ceremony produced the key whose address was pre-registered in governance. This is done by computing the on-chain address from `C_0` and comparing to the registered value. No `k*` involved; the comparison is on public points.
+
+If any custodian's verification fails, the ceremony output is considered compromised: destroy all Phase-1 output and re-run the ceremony with fresh material.
+
+**Why this replaces the v1 dry-run.** The v1 post-ceremony procedure reconstructed `k*` on a "shared witness-computer with camera attestation" to produce a dry-run signature. That placed `k*` on a general-purpose device, violating the ceremony's central property (the airgapped dealer device is the only place `k*` ever exists; its storage is destroyed before custodians leave the room). The Feldman-commitment procedure above preserves the invariant while giving stronger liveness evidence: every shard is publicly verified against a commitment that the dealer signed, and `C_0` is publicly verifiable against the on-chain owner address.
+
+### 6.3 First legitimate signing is the liveness test
+
+The first production signing operation — which reconstructs `k*` momentarily on the signing environment per §12 of the security spec — is the first and only time `k*` assembles after the ceremony. By this point:
+
+- Custodians have each independently verified their shard against the commitments.
+- Security Lead has verified `C_0` corresponds to the intended on-chain owner.
+- The first signing is the execution test; it runs on the production signing environment (which has its own security properties), not on a one-off "dry-run" laptop.
+
+The first signing should be chosen to be low-consequence: a governance-acknowledgment transaction, a small-value transfer to a team-controlled address, or a contract call that is idempotent. This is a production signing in every respect; there is no separate dry-run.
+
+### 6.4 On failure
+
+If any of §6.1 / §6.2 steps fail: re-run the ceremony with a fresh key and destroy the Phase-1 output. Do NOT attempt to "patch" a partial ceremony.
 
 ---
 
