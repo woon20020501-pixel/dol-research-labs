@@ -38,11 +38,19 @@ Information-theoretic security analysis for the threshold secret sharing constru
 
 Read: [`polyshard-security.md`](./polyshard-security.md)
 
-### PolyVault: Bio-Hybrid Multi-Layer Security
+### PolyVault: DeFi Treasury Custody Stack (v3.2)
 
-Formal security analysis of the PolyVault system — a six-layer defense-in-depth architecture combining dual post-quantum encryption (McEliece + Kyber), Shamir secret sharing, fuzzy biometric extraction, SPHINCS+ signatures, and Honey Encryption. Each layer's security property is stated as a theorem with proof sketch and automated verification. Statistical tests confirm the Honey Encryption DTE property and fuzzy extractor uniformity empirically.
+Six-layer defense-in-depth custody stack re-architected for DeFi treasury use: Argon2id-stretched custodian authentication, AEAD shard lock, honey-encryption passphrase decoy (wraps the passphrase, not the key — uniform keys get no benefit from HE), Shamir threshold over secp256k1 `F_n`, dual-AEAD cold backup across three facilities (→ McEliece ∘ ML-KEM in production), and SPHINCS+ audit signatures. Four decisions pinned to implementation level: cold-backup storage topology, DKG procedure (air-gapped dealer → HSM → Pedersen DKG, tiered by AUM), Argon2id parameters + `shard_blob` wire format v1 (98 bytes fixed), and PassphraseDTE wire-level spec (22-byte `he_blob`, HMAC-SHA256 PRF, 1024-word common corpus + 4096-word algorithmic tail).
 
-Read: [`polyvault-security.md`](./polyvault-security.md)
+Companion documents:
+
+- [`polyvault-security.md`](./polyvault-security.md) — architectural spec
+- [`polyvault-dte-spec.md`](./polyvault-dte-spec.md) — DTE wire-level implementation spec
+- [`polyvault-ceremony-runbook.md`](./polyvault-ceremony-runbook.md) — Phase 1 air-gapped DKG runbook
+- [`polyvault-rust-port-plan.md`](./polyvault-rust-port-plan.md) — implementation sequencing for the Dol Rust runtime
+- [`verification/polyvault_defi_sim.py`](./verification/polyvault_defi_sim.py) — 11-test reference oracle (S1 threshold round-trip, S4 DRBG independence, S7 HE over uniform keys is useless, S9 Argon2id slowdown, S10 on-device duress canary, S11 wire-format conformance)
+
+The previous bio-hybrid / individual-user version is preserved in [`archive/polyvault-security-v1.md`](./archive/polyvault-security-v1.md) with its original verification scripts under [`verification/legacy/`](./verification/legacy/). The v1 tests remain valid for their original scope (individual-user custody); they are not part of the v3.2 production path.
 
 ---
 
@@ -69,9 +77,10 @@ Dol Phase 1 (live)
        │     Treasury key management security layer.
        │     Information-theoretic guarantee (not computational).
        │
-       └── PolyVault
-              Multi-layer encryption + biometric + signing.
-              Six defense layers, each with formal security theorem.
+       └── PolyVault v3.2
+              DeFi treasury custody stack: custodian auth (Argon2id + token),
+              AEAD shard, HE passphrase decoy, Shamir over secp256k1 F_n,
+              3-facility cold backup, SPHINCS+ audit. Four implementation pins.
 ```
 
 ---
@@ -81,8 +90,14 @@ Dol Phase 1 (live)
 Mathematical claims in these documents are tested by an automated verification suite. Run it with:
 
 ```
-pip install pytest numpy scipy sympy
+pip install pytest numpy scipy sympy pycryptodome argon2-cffi
 pytest verification/
+```
+
+The PolyVault v3.2 DeFi reference oracle (`verification/polyvault_defi_sim.py`) runs 11 simulations covering every architectural decision; reproduce with:
+
+```
+python3 verification/polyvault_defi_sim.py
 ```
 
 Resolved findings are documented in [`FINDINGS.md`](./FINDINGS.md).
@@ -107,11 +122,22 @@ Resolved findings are documented in [`FINDINGS.md`](./FINDINGS.md).
 | MDLW simplex / bounded payout | test_doc4_mdlw.py | formula only | follows from exp-gradient normalization |
 | Panjer severity distributions | test_real_panjer.py | partial | severity shape checked, compound ES underspecified |
 | Shamir info-theoretic security | test_doc1_polyshard.py | theoretical | re-derives Shamir 1979 |
-| Nested-IND-CCA2 (Th1) | test_polyvault_nested_enc.py | implementation | round-trip, tamper detection, layer independence |
-| Fuzzy Extractor uniformity (Th3) | test_polyvault_fuzzy.py | **statistical** | chi-squared + bit balance on 10k extracted keys |
-| SPHINCS+ EUF-CMA structure (Th4) | test_polyvault_sphincs.py | implementation | Lamport OTS: sign/verify, tamper, preimage |
-| Honey Enc. DTE property (Th5) | test_polyvault_honey.py | **statistical** | chi-squared + KS test, 50k wrong-key decryptions |
-| PolyVault composition (Th6) | test_polyvault_composition.py | structural | key independence, union bound, full pipeline |
+| PolyVault v3.2 threshold round-trip (S1) | polyvault_defi_sim.py | **full** | all C(5,3)=10 combinations sign + audit-verify |
+| Sub-threshold zero-info over F_n (S2) | polyvault_defi_sim.py | theoretical | Shamir 1979 on secp256k1 scalar field |
+| Stolen-shard lock + HE decoy (S3) | polyvault_defi_sim.py | **empirical** | 200/200 wrong-token AEAD failures; HE decoy rate ≈0.89 |
+| DRBG independence across layers (S4) | polyvault_defi_sim.py | **statistical** | pairwise \|r\| < 0.05 on 5000 samples |
+| PSS: preserve k*, rotate shards (S5) | polyvault_defi_sim.py | **full** | new polynomial, k* unchanged |
+| Full rotation orphans old material (S6) | polyvault_defi_sim.py | **full** | no cross-recovery |
+| HE over uniform keys is useless (S7) | polyvault_defi_sim.py | **empirical** | uniform-key wrong-decrypt p≈1; justifies passphrase-only HE |
+| End-to-end latency (S8) | polyvault_defi_sim.py | **benchmark** | provision ~40ms, sign ~25ms (single-core crypto only) |
+| Slow-KDF brute-force barrier (S9) | polyvault_defi_sim.py | **benchmark** | 3,000× slowdown at sim params; prod ≥20,000× |
+| On-device duress canary poisons recon (S10) | polyvault_defi_sim.py | **full** | 1/2/3 duress passphrases all yield k_recovered ≠ k* |
+| Wire format v1 conformance (S11) | polyvault_defi_sim.py | **full** | shard_blob 98B + he_blob 22B byte-exact |
+| [legacy v1] Nested-IND-CCA2 | legacy/test_polyvault_nested_enc.py | implementation | preserved for historical reference |
+| [legacy v1] Fuzzy Extractor uniformity | legacy/test_polyvault_fuzzy.py | statistical | preserved; not part of v3.2 path |
+| [legacy v1] SPHINCS+ structure | legacy/test_polyvault_sphincs.py | implementation | preserved |
+| [legacy v1] Honey Encryption (plaintext-wrap) | legacy/test_polyvault_honey.py | statistical | preserved; S7 shows this was misapplied |
+| [legacy v1] Composition | legacy/test_polyvault_composition.py | structural | preserved |
 
 **Coverage levels:** **full** = independent computation that could falsify the claim. **symbolic** = SymPy derivation confirming stated math. **independent** = different method cross-validates result. **cross-check** = compares numbers within/across documents. **conditional** = verifies "if X then Y" but not that actual params satisfy X. **algorithm** = tests our implementation, not the protocol's. **formula only** = trivially true from formula structure. **tautology** = true by definition. **theoretical** = known theorem. **partial** = some parameters underspecified.
 
