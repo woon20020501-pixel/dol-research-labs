@@ -11,6 +11,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install pytest numpy scipy sympy pycryptodome
-      - name: Run verification suite
+        run: pip install pytest numpy scipy sympy pycryptodome argon2-cffi
+      - name: Run verification suite (includes verification/legacy/ and polyvault_defi_sim.py)
         run: pytest verification/ -v --tb=short
+      - name: Run PolyVault v3.2 DeFi reference oracle (standalone)
+        run: python3 verification/polyvault_defi_sim.py
